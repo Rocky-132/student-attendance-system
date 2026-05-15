@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Attendance - Report</title>
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.6/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+    integrity="sha384-4Q6Gf2aSP4eDXB8Miphtr37CMZZQ5oXLH2yaXMJ2w8e2ZtHTl7GptT4jmndRuHDT"
+    crossorigin="anonymous"
+  />
+  <style>
+    body {
+      background-color: #f6f6f6;
+      font-family: 'Playfair Display', serif;
+      margin: 0;
+    }
+    header {
+      background-color: #023246;
+      color: #f6f6f6;
+      padding: 12px 0;
+      text-align: center;
+      font-size: 24px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+    .top-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background-color: #dee2e6;
+      padding: 8px 16px;
+      font-size: 16px;
+      color: #333;
+      flex-wrap: wrap;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+    .top-bar > div {
+      margin: 4px 0;
+    }
+    #date-time {
+      font-weight: bold;
+      color: #555;
+    }
+    footer {
+      background-color: #023246;
+      color: #f6f6f6;
+      text-align: center;
+      padding: 12px 0;
+      margin-top: 40px;
+    }
+  </style>
+</head>
+
+<body>
+  <header>Smart Attendance System</header>
+
+  <div class="top-bar">
+    <div>
+      <strong>Teacher:</strong> <span id="username"></span> |
+      <strong>Class ID:</strong> <span id="class-id"></span>
+    </div>
+    <div id="date-time" class="text-end"></div>
+  </div>
+
+  <div class="container mt-4">
+    <div class="row mb-3 text-center">
+      <div class="col-md-6">
+        <div class="alert alert-success" id="todayStrength"></div>
+      </div>
+      <div class="col-md-6">
+        <div class="alert alert-info" id="prevDayStrength"></div>
+      </div>
+    </div>
+
+    <h4 class="text-center mb-4">Class Attendance Analytics</h4>
+    <div class="row g-4">
+      <div class="col-lg-6 col-md-12">
+        <div class="card shadow-sm p-3 border-0 bg-light">
+          <h5 class="text-center">Overall Attendance</h5>
+          <canvas id="attendanceDoughnutChart" style="max-height: 250px;"></canvas>
+        </div>
+      </div>
+      <div class="col-lg-6 col-md-12">
+        <div class="card shadow-sm p-3 border-0 bg-light">
+          <h5 class="text-center">Daily Trend</h5>
+          <canvas id="dailyLineChart" style="max-height: 250px;"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="text-center mt-5 mb-4">Attendance Report</h3>
+    <div class="row mb-3">
+      <div class="col-md-4 offset-md-4">
+        <input type="date" id="dateFilter" class="form-control" />
+      </div>
+    </div>
+
+    <div class="table-responsive">
+      <table class="table table-bordered table-hover align-middle bg-white">
+        <thead class="table-primary text-center">
+          <tr>
+            <th>Date</th>
+            <th>Student Name</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="attendanceReportTable"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer>
+    &copy; 2025 Smart Attendance System. All rights reserved.
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.6/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+  // === IndexedDB Setup ===
+  let db;
+  const DB_NAME = 'attendanceDB', DB_VERSION = 6;
+  let holidayDatesSet = new Set();
+
+  function openDB() {
+    return new Promise((resolve, reject) => {
+      if (db) return resolve(db);
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = function (evt) {
+        db = evt.target.result;
+        ["classes", "students", "teachers", "holidays", "attendance", "logs"].forEach(store => {
+          if (!db.objectStoreNames.contains(store)) {
+            db.createObjectStore(store, {
+              keyPath: store === 'holidays' ? 'date' : 'id',
+              autoIncrement: store === 'attendance' || store === 'logs'
+            });
+          }
+        });
+      };
+      req.onsuccess = evt => { db = evt.target.result; resolve(db); };
+      req.onerror = evt => reject(evt.target.error);
+    });
+  }
+
+  function getAll(store) {
+    return openDB().then(() =>
+      new Promise((res, rej) => {
+        const tx = db.transaction([store], "readonly"),
+              s = tx.objectStore(store),
+              r = s.getAll();
+        r.onsuccess = () => res(r.result);
+        r.onerror = () => rej(r.error);
+      })
+    );
+  }
+
+  // --- Utility Functions ---
+  function updateDateTime() {
+    const now = new Date();
+    document.getElementById("date-time").textContent =
+      `${now.toLocaleDateString()} | ${now.toLocaleTimeString()}`;
+  }
+  updateDateTime();
+  setInterval(updateDateTime, 1000);
+
+  function getTeacherId() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const tid = urlParams.get("teacherid");
+    if (tid) {
+      localStorage.setItem('teacherid', tid);
+      return tid;
+    }
+    const storedTid = localStorage.getItem('teacherid');
+    if (storedTid) return storedTid;
+    return null;
+  }
+
+  function getClassId() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const cid = urlParams.get("classid");
+    if (cid) {
+      localStorage.setItem('classid', cid);
+      return cid;
+    }
+    const storedCid = localStorage.getItem('classid');
+    if (storedCid) return storedCid;
+    return null;
+  }
+
+  async function setTeacherAndClassInfo() {
+    await openDB();
+
+    const teacherId = getTeacherId();
+    const classId = getClassId();
+
+    if (!teacherId || !classId) {
+      alert("Missing teacher ID or class ID. Please login again.");
+      window.location.href = "index.html";
+      return;
+    }
+
+    // Get teacher name from DB
+    let teacherName = teacherId;
+    if (teacherId) {
+      const teachers = await getAll('teachers');
+      const teacher = teachers.find(t => t.teacherid === teacherId || t.id === teacherId);
+      if (teacher) teacherName = teacher.name + " (" + teacherId + ")";
+    }
+
+    // Get class name from DB
+    let className = classId;
+    if (classId) {
+      const classes = await getAll('classes');
+      const cls = classes.find(c => c.classid === classId || c.id === classId);
+      if (cls && cls.name) className = cls.name + " (" + classId + ")";
+    }
+
+    document.getElementById('username').textContent = teacherName || "";
+    document.getElementById('class-id').textContent = className || "";
+  }
+
+  // Global attendance record cache
+  let attendanceRecords = [];
+
+  async function loadHolidayDatesSet() {
+    const holidays = await getAll('holidays');
+    holidayDatesSet = new Set(holidays.map(h => h.date));
+  }
+
+  async function loadAttendanceRecords() {
+    attendanceRecords = await getAll('attendance');
+    await loadHolidayDatesSet();
+    renderAttendanceReport(document.getElementById("dateFilter").value);
+    await updateStrengthDisplays();
+    renderAttendanceDoughnutChart();
+    renderDailyLineChart();
+  }
+
+  // --- Deduplication utility (admin-wins, per student/date/class) ---
+  function dedupAttendance(records, classId, filterDate = null) {
+    // filter for classId
+    const perDayPerStudent = {};
+    records.forEach(r => {
+      if (!(r.classId === classId || r.classid === classId)) return;
+      if (holidayDatesSet.has(r.date)) return;
+      if (filterDate && r.date !== filterDate) return;
+      const sid = r.studentId || r.studentid || r.id;
+      const key = `${sid}|${r.date}`;
+      if (!perDayPerStudent[key]) {
+        perDayPerStudent[key] = r;
+      } else if (r.markedByAdmin === true) {
+        perDayPerStudent[key] = r; // admin wins
+      }
+    });
+    return Object.values(perDayPerStudent);
+  }
+
+  // ---------- Attendance Report Table (dedup!) ----------
+  async function renderAttendanceReport(filterDate = "") {
+    const tbody = document.getElementById("attendanceReportTable");
+    tbody.innerHTML = "";
+
+    const classId = getClassId();
+
+    if (!classId) {
+      tbody.innerHTML = `<tr><td colspan="3" class="text-center text-danger">Class ID missing. Please login again.</td></tr>`;
+      return;
+    }
+
+    const students = await getAll('students');
+    const classStudents = students.filter(s =>
+      s.classid === classId || s.classId === classId || s.class_id === classId
+    );
+    const classStudentIds = new Set(classStudents.map(s => s.studentid || s.id));
+    const studentMap = {};
+    classStudents.forEach(s => {
+      studentMap[s.studentid || s.id] = s.name;
+    });
+
+    const isFilteringByDate = Boolean(filterDate);
+    if (isFilteringByDate && holidayDatesSet.has(filterDate)) {
+      // Show "Holiday" status for all students on the holiday date
+      classStudents.forEach(student => {
+        const row = document.createElement("tr");
+        row.classList.add("text-center");
+        row.innerHTML = `
+          <td>${filterDate}</td>
+          <td>${student.name}</td>
+          <td>Holiday</td>
+        `;
+        tbody.appendChild(row);
+      });
+      return;
+    }
+
+    // --- Deduplicate before display ---
+    const dedupedRecords = dedupAttendance(attendanceRecords, classId, filterDate);
+
+    // Reconfirm in-class students only, and order by name/date
+    const showRecords = dedupedRecords.filter(record => classStudentIds.has(record.studentid || record.studentId || record.id));
+    if (showRecords.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="3" class="text-center text-muted">No attendance records found for this class and date.</td></tr>`;
+      return;
+    }
+
+    showRecords.sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      const aName = studentMap[a.studentid || a.studentId || a.id] || "";
+      const bName = studentMap[b.studentid || b.studentId || b.id] || "";
+      return aName.localeCompare(bName);
+    });
+
+    showRecords.forEach(record => {
+      const row = document.createElement("tr");
+      row.classList.add("text-center");
+      const studentName = studentMap[record.studentid || record.studentId || record.id] || "";
+      row.innerHTML = `
+        <td>${record.date}</td>
+        <td>${studentName}</td>
+        <td>${record.status}</td>
+      `;
+      tbody.appendChild(row);
+    });
+  }
+
+
+  document.getElementById("dateFilter").addEventListener("change", function () {
+    renderAttendanceReport(this.value);
+  });
+
+  // ---------- Donut Chart with Deduplication ----------
+  async function getOverallSummary() {
+    await loadHolidayDatesSet();
+    const classId = getClassId();
+    const students = await getAll('students');
+    const classStudentIds = new Set(
+      students
+        .filter(s => s.classid === classId || s.classId === classId || s.class_id === classId)
+        .map(s => s.studentid || s.id)
+    );
+
+    // Use deduplication across all records for this class
+    const deduped = dedupAttendance(attendanceRecords, classId);
+
+    let present = 0, absent = 0;
+    deduped.forEach(r => {
+      if (!classStudentIds.has(r.studentId || r.studentid || r.id)) return;
+      if (r.status === "Present") present++;
+      else if (r.status === "Absent") absent++;
+    });
+    return { present, absent };
+  }
+
+  async function renderAttendanceDoughnutChart() {
+    const overall = await getOverallSummary();
+    const ctx = document.getElementById("attendanceDoughnutChart").getContext("2d");
+    // Clear previous canvas to avoid duplicates
+    const chartContainer = ctx.canvas.parentNode;
+    ctx.canvas.remove();
+    const newCanvas = document.createElement('canvas');
+    newCanvas.id = "attendanceDoughnutChart";
+    newCanvas.style.maxHeight = '250px';
+    chartContainer.appendChild(newCanvas);
+    const newCtx = newCanvas.getContext("2d");
+
+    new Chart(newCtx, {
+      type: 'doughnut',
+      data: {
+        labels: ['Present', 'Absent'],
+        datasets: [{
+          data: [overall.present, overall.absent],
+          backgroundColor: ['rgba(54, 162, 235, 0.85)', 'rgba(255, 99, 132, 0.85)'],
+          borderWidth: 2,
+          borderColor: '#fff',
+          hoverOffset: 12
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: { font: { size: 16 }, color: '#333' }
+          },
+          title: {
+            display: true,
+            text: 'Overall Attendance Distribution',
+            font: { size: 20 }
+          },
+          datalabels: {
+            color: '#fff',
+            font: { weight: 'bold', size: 13 },
+            formatter: (value, context) => {
+              const total = context.chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
+              return total ? `${((value / total) * 100).toFixed(1)}%` : "0%";
+            }
+          },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const value = ctx.parsed;
+                const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                return `${ctx.label}: ${value} (${total ? ((value / total) * 100).toFixed(1) : 0}%)`;
+              }
+            }
+          }
+        }
+      },
+      plugins: [ChartDataLabels]
+    });
+  }
+
+  // ---------- Trend Graph with Deduplication ----------
+  function groupByDate(records) {
+    const grouped = {};
+    const perDayPerStudent = {};
+    const classId = getClassId();
+
+    for (const r of records) {
+      if (!(r.classId === classId || r.classid === classId)) continue;
+      if (holidayDatesSet.has(r.date)) continue;
+      const studentId = r.studentId || r.studentid || r.id;
+      const date = r.date;
+      const key = `${studentId}|${date}`;
+      // Only one record per student per day: admin wins
+      if (!perDayPerStudent[key]) {
+        perDayPerStudent[key] = r;
+      } else if (r.markedByAdmin === true) {
+        perDayPerStudent[key] = r;
+      }
+    }
+
+    Object.values(perDayPerStudent).forEach(r => {
+      if (!grouped[r.date]) grouped[r.date] = { Present: 0, Absent: 0 };
+      if (r.status === "Present") grouped[r.date].Present++;
+      if (r.status === "Absent") grouped[r.date].Absent++;
+    });
+    return grouped;
+  }
+
+  async function renderDailyLineChart() {
+    await loadHolidayDatesSet();
+    const grouped = groupByDate(attendanceRecords);
+    const dates = Object.keys(grouped).sort();
+    const presentCounts = dates.map(date => grouped[date].Present);
+    const absentCounts = dates.map(date => grouped[date].Absent);
+
+    // Remove and replace canvas element for clean rendering
+    const ctx = document.getElementById('dailyLineChart').getContext('2d');
+    const chartContainer = ctx.canvas.parentNode;
+    ctx.canvas.remove();
+    const newCanvas = document.createElement('canvas');
+    newCanvas.id = "dailyLineChart";
+    newCanvas.style.maxHeight = '250px';
+    chartContainer.appendChild(newCanvas);
+    const newCtx = newCanvas.getContext("2d");
+
+    new Chart(newCtx, {
+      type: 'line',
+      data: {
+        labels: dates,
+        datasets: [
+          {
+            label: 'Present',
+            data: presentCounts,
+            borderColor: 'rgba(54, 162, 235, 1)',
+            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+            fill: true,
+            tension: 0.4,
+            pointRadius: 4
+          },
+          {
+            label: 'Absent',
+            data: absentCounts,
+            borderColor: 'rgba(255, 99, 132, 1)',
+            backgroundColor: 'rgba(255, 99, 132, 0.2)',
+            fill: true,
+            tension: 0.4,
+            pointRadius: 4
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: {
+            position: 'top',
+            labels: { font: { size: 14 }, color: '#333' }
+          },
+          title: {
+            display: true,
+            text: 'Attendance Over Time',
+            font: { size: 18 }
+          }
+        },
+        interaction: {
+          mode: 'nearest',
+          axis: 'x',
+          intersect: false
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: { precision: 0 }
+          }
+        }
+      }
+    });
+  }
+
+  function getTodayDate() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  function getPrevDate() {
+    const prev = new Date();
+    prev.setDate(prev.getDate() - 1);
+    return prev.toISOString().slice(0, 10);
+  }
+
+  // Correctly deduplicate for strength
+  function getStrength(date) {
+    const classId = getClassId();
+    const records = attendanceRecords.filter(r =>
+      r.date === date &&
+      (r.classId === classId || r.classid === classId)
+    );
+    // Only unique per student/day, admin wins
+    const statusByStudent = {};
+    for (const r of records) {
+      const sid = r.studentId || r.studentid || r.id;
+      if (!statusByStudent[sid]) {
+        statusByStudent[sid] = r;
+      } else if (r.markedByAdmin === true) {
+        statusByStudent[sid] = r;
+      }
+    }
+    return Object.values(statusByStudent).filter(r => r.status === "Present").length;
+  }
+
+  async function isHoliday(date) {
+    await loadHolidayDatesSet();
+    return holidayDatesSet.has(date);
+  }
+
+  async function updateStrengthDisplays() {
+    const today = getTodayDate();
+    const prev = getPrevDate();
+
+    if (await isHoliday(today)) {
+      document.getElementById("todayStrength").textContent =
+        `Today is a Holiday (${today})`;
+    } else {
+      document.getElementById("todayStrength").textContent =
+        `Today's Strength (${today}): ${getStrength(today)}`;
+    }
+
+    if (await isHoliday(prev)) {
+      document.getElementById("prevDayStrength").textContent =
+        `Yesterday was a Holiday (${prev})`;
+    } else {
+      document.getElementById("prevDayStrength").textContent =
+        `Previous Day's Strength (${prev}): ${getStrength(prev)}`;
+    }
+  }
+
+  function getMostRecentDate() {
+    const dates = [...new Set(attendanceRecords.map(r => r.date))];
+    return dates.sort().reverse()[0] || "";
+  }
+  window.addEventListener("DOMContentLoaded", async () => {
+    await setTeacherAndClassInfo();
+    await loadAttendanceRecords();
+    const recentDate = getMostRecentDate();
+    if (recentDate) {
+      document.getElementById("dateFilter").value = recentDate;
+      await renderAttendanceReport(recentDate);
+    } else {
+      await renderAttendanceReport();
+    }
+    await updateStrengthDisplays();
+    await renderAttendanceDoughnutChart();
+    await renderDailyLineChart();
+  });
+</script>
+</body>
+</html>

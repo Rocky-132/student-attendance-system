@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Student Attendance System</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.6/dist/css/bootstrap.min.css"/>
+  <style>
+    body {
+      background-color: #f6f6f6;
+      font-family: 'Playfair Display', serif;
+    }
+    .appname {
+      background-color: #023246;
+      color: #f6f6f6;
+      padding: 10px 0;
+      text-align: center;
+      font-size: 24px;
+      font-weight: bold;
+      margin-top: 20px;
+    }
+    .card {
+      border-radius: 10px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+    .card-body {
+      padding: 2rem;
+    }
+    .form-label {
+      font-weight: bold;
+    }
+    .custom-login-btn {
+      background-color: #267094;
+      color: white;
+      transition: background-color 0.3s ease;
+    }
+    .custom-login-btn:hover {
+      background-color: #1e5d7a;
+      color: #ffffff;
+    }
+    .loading {
+      display: none;
+    }
+    .error-message {
+      color: #dc3545;
+      font-size: 14px;
+      margin-top: 5px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="appname">Student Attendance System</div>
+
+<form id="loginForm">
+  <div class="container mt-6">
+    <div class="row justify-content-center">
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-body">
+            <h3 class="text-center mb-4">Login</h3>
+
+            <div class="mb-3">
+              <label class="form-label">Teacher</label>
+              <input type="radio" name="userType" value="teacher" checked onchange="toggleFields()" />
+              <label class="form-label">Student</label>
+              <input type="radio" name="userType" value="student" onchange="toggleFields()" />
+            </div>
+
+            <div class="mb-3" id="studentIdGroup" style="display: none;">
+              <label for="studentid" class="form-label">Student ID</label>
+              <input type="text" class="form-control" id="studentid" placeholder="Enter your Student ID" />
+            </div>
+
+            <div class="mb-3" id="studentNameGroup" style="display: none;">
+              <label for="studentname" class="form-label">Name</label>
+              <input type="text" class="form-control" id="studentname" placeholder="Enter your Name" />
+            </div>
+
+            <div class="mb-3" id="teacherIdGroup">
+              <label for="teacherid" class="form-label">Teacher ID</label>
+              <input type="text" class="form-control" id="teacherid" placeholder="Enter your Teacher ID" />
+            </div>
+
+            <div class="mb-3" id="classIdGroup">
+              <label for="classid" class="form-label">Class</label>
+              <select name="classid" class="form-control" id="classid">
+                <option value="" disabled selected>-- Select Class --</option>
+                <!-- dynamically filled -->
+              </select>
+            </div>
+
+            <div class="mb-3" id="passwordGroup">
+              <label for="password" class="form-label">Password</label>
+              <input type="password" class="form-control" id="password" placeholder="Enter your password" />
+            </div>
+
+            <div id="errorMessage" class="error-message"></div>
+
+            <button type="submit" class="btn w-100 custom-login-btn">
+              <span class="loading">Logging in...</span>
+              <span class="login-text">Login</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</form>
+
+<script>
+// ============= IndexedDB HELPERS (MUST MATCH admin dashboard) =============
+let db;
+const DB_NAME = 'attendanceDB', DB_VERSION = 6; // ✅ Fixed by using version 2
+function openDB() {
+  return new Promise((resolve, reject) => {
+    if (db) return resolve(db);
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = evt => {
+      db = evt.target.result;
+      ['classes', 'students', 'teachers', 'holidays'].forEach(store =>
+        !db.objectStoreNames.contains(store) && db.createObjectStore(store, { keyPath: store === 'holidays' ? 'date' : 'id' })
+      );
+      if (!db.objectStoreNames.contains('logs')) db.createObjectStore('logs', { autoIncrement: true });
+    };
+    req.onsuccess = evt => { db = evt.target.result; resolve(db); };
+    req.onerror = evt => reject(evt.target.error);
+  });
+}
+function getAll(store) {
+  return openDB().then(() =>
+    new Promise((res, rej) => {
+      const tx = db.transaction([store], "readonly"), s = tx.objectStore(store), r = s.getAll();
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    })
+  );
+}
+
+// =========== UI helpers ==========
+function showError(message) {
+  const errorDiv = document.getElementById('errorMessage');
+  errorDiv.textContent = message;
+  errorDiv.style.display = 'block';
+}
+function clearError() {
+  const errorDiv = document.getElementById('errorMessage');
+  errorDiv.textContent = '';
+  errorDiv.style.display = 'none';
+}
+function setLoading(loading) {
+  const loadingSpan = document.querySelector('.loading');
+  const loginSpan = document.querySelector('.login-text');
+  const submitBtn = document.querySelector('button[type="submit"]');
+  if (loading) {
+    loadingSpan.style.display = 'inline';
+    loginSpan.style.display = 'none';
+    submitBtn.disabled = true;
+  } else {
+    loadingSpan.style.display = 'none';
+    loginSpan.style.display = 'inline';
+    submitBtn.disabled = false;
+  }
+}
+
+// ==== CLASS DROPDOWN: Load from IndexedDB ====
+async function populateClassDropdown() {
+  await openDB();
+  const sel = document.getElementById("classid");
+  const classes = await getAll('classes');
+  sel.innerHTML = `<option value="" disabled selected>-- Select Class --</option>`;
+  for (const cls of classes) {
+    sel.innerHTML += `<option value="${cls.id}">${cls.id}${cls.name ? ` - ${cls.name}` : ''}</option>`;
+  }
+}
+// Load classes on page load, and reset fields
+window.onload = function() {
+  populateClassDropdown();
+  toggleFields();
+};
+
+// ==== Field show/hide ====
+function toggleFields() {
+  const userType = document.querySelector('input[name="userType"]:checked').value;
+  document.getElementById("teacherIdGroup").style.display = userType === "teacher" ? "block" : "none";
+  document.getElementById("passwordGroup").style.display = userType === "teacher" ? "block" : "none";
+  document.getElementById("studentIdGroup").style.display = userType === "student" ? "block" : "none";
+  document.getElementById("studentNameGroup").style.display = userType === "student" ? "block" : "none";
+  clearError();
+}
+document.querySelectorAll('input[name="userType"]').forEach(r => r.addEventListener('change', toggleFields));
+
+// ==== LOGIN HANDLER ====
+document.getElementById("loginForm").addEventListener("submit", async function (e) {
+  e.preventDefault();
+  clearError();
+  setLoading(true);
+
+  const userType = document.querySelector('input[name="userType"]:checked').value;
+  const classIdValue = document.getElementById("classid").value;
+  if (!classIdValue) {
+    showError("Please select a class.");
+    setLoading(false);
+    return;
+  }
+
+  try {
+    await openDB();
+    // TEACHER LOGIN
+    if (userType === "teacher") {
+      const teacherId = document.getElementById("teacherid").value.trim();
+      const password = document.getElementById("password").value.trim();
+      if (!teacherId || !password) {
+        showError("Please fill all required fields.");
+        setLoading(false);
+        return;
+      }
+      const teachers = await getAll("teachers");
+      // Try matching by id (your admin system uses id)
+      const teacher = teachers.find(t =>
+        (t.id || t.teacherid) === teacherId && t.password === password
+      );
+      setLoading(false);
+      if (!teacher) {
+        showError("Invalid Teacher ID or Password.");
+        return;
+      }
+      // Success: store and redirect
+      localStorage.setItem("teacherid", teacherId);
+      localStorage.setItem("classid", classIdValue);
+      localStorage.setItem("userType", "teacher");
+      alert("✅ Teacher login successful!");
+      // Change to your teacher dashboard page if needed
+      window.location.href = `teacherlogin.html?teacherid=${encodeURIComponent(teacherId)}&classid=${encodeURIComponent(classIdValue)}`;
+
+    // STUDENT LOGIN
+    } else if (userType === "student") {
+      const studentId = document.getElementById("studentid").value.trim();
+      const studentName = document.getElementById("studentname").value.trim();
+      if (!studentId || !studentName) {
+        showError("Please enter Student ID and Name.");
+        setLoading(false);
+        return;
+      }
+      const students = await getAll("students");
+      const student = students.find(s =>
+        (s.id || s.studentid) === studentId &&
+        s.name === studentName &&
+        (s.classId === classIdValue || s.classid === classIdValue)
+      );
+      setLoading(false);
+      if (!student) {
+        showError("Student not found or invalid details.");
+        return;
+      }
+      localStorage.setItem("studentid", studentId);
+      localStorage.setItem("classid", classIdValue);
+      localStorage.setItem("studentname", studentName);
+      localStorage.setItem("userType", "student");
+      alert("✅ Student login successful!");
+      window.location.href = `studentlogin.html?classid=${classIdValue}&studentid=${studentId}&name=${encodeURIComponent(studentName)}`;
+    }
+
+  } catch (err) {
+    setLoading(false);
+    console.error("Login error:", err);
+    showError("An error occurred during login. Please try again.");
+  }
+});
+
+// Show link if student is logged in
+if (localStorage.getItem("userType") === "student") {
+  document.getElementById("studentLoggedInLink").innerHTML =
+    `<a href="studentlogin.html" class="btn btn-outline-primary btn-sm">Go to Student Dashboard</a>`;
+}
+</script>
+
+
+<!-- Place this inside your <footer> -->
+<footer class="text-center mt-5 py-3" style="background-color: #023246; color: #f6f6f6;">
+  &copy; 2025 Student Attendance System. All rights reserved;
+
+  <!-- Admin button: initially hidden -->
+  <button id="adminButton"
+          style="
+            position: fixed;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: none;
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            z-index: 9999;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+          ">
+    Admin
+  </button>
+</footer>
+
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const adminButton = document.getElementById('adminButton');
+    const adminPassword = "admin@dept";
+
+    // Toggle admin button visibility when Alt + A is pressed
+    document.body.addEventListener('keydown', function(e) {
+      if (e.altKey && e.key.toLowerCase() === 'a') {
+        if (adminButton.style.display === "none" || adminButton.style.display === "") {
+          // Show button
+          adminButton.style.display = "block";
+          // Optionally alert or silently toggle
+          // alert("Admin button is now visible");
+        } else {
+          // Hide button
+          adminButton.style.display = "none";
+          // alert("Admin button is now hidden");
+        }
+      }
+    });
+
+    // On click, ask for password before redirect
+    adminButton.addEventListener('click', () => {
+      const enteredPwd = prompt("Enter admin password:");
+      if (enteredPwd === adminPassword) {
+        window.location.href = 'Admin.html';
+      } else if (enteredPwd !== null) {
+        alert("Incorrect password. Access denied.");
+      }
+    });
+  });
+</script>
+
+
+</body>
+</html>

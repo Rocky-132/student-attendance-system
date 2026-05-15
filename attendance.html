@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Attendance</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.6/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+    <style>
+        body {
+            background-color: #f6f6f6;
+            font-family: 'PlayfairDisplay', serif;
+            margin: 0;
+        }
+
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: #dee2e6;
+            padding: 8px 16px;
+            font-size: 16px;
+            color: #333;
+            flex-wrap: wrap;
+        }
+
+        .top-bar>div {
+            margin: 4px 0;
+        }
+
+        header {
+            background-color: #023246;
+            color: #f6f6f6;
+            padding: 12px 0;
+            text-align: center;
+            font-size: 24px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        #date-time {
+            font-weight: bold;
+            color: #555;
+        }
+    </style>
+</head>
+
+<body>
+    <header>Smart Attendance System</header>
+    <div class="top-bar">
+        <div>
+            <strong>Teacher:</strong> <span id="username"></span> |
+            <strong>Class ID:</strong> <span id="class-id"></span>
+        </div>
+        <div id="date-time" class="text-end"></div>
+    </div>
+
+    <div class="container mt-4">
+        <h3 class="text-center mb-4">Mark Attendance</h3>
+        <div class="d-flex justify-content-end mb-2">
+            <input type="checkbox" id="selectAllCheckbox" class="form-check-input">
+            <label for="selectAllCheckbox" class="form-label ms-2">Mark All Present</label>
+        </div>
+        <form id="attendanceForm">
+            <div class="table-responsive">
+                <table class="table table-bordered table-hover align-middle bg-white">
+                    <thead class="table-primary text-center">
+                        <tr>
+                            <th>Student Name</th>
+                            <th>Yesterday's Attendance</th>
+                            <th>Mark Present Today</th>
+                        </tr>
+                    </thead>
+                    <tbody id="studentTable">
+                        <!-- JS will populate -->
+                    </tbody>
+                </table>
+            </div>
+            <div class="text-center">
+                <button type="submit" class="btn btn-success mt-3 px-4">Submit Attendance</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="text-center">
+        <button class="btn btn-danger mt-3 px-4" data-bs-toggle="modal" data-bs-target="#holidayModal">Set as Holiday</button>
+    </div>
+
+    <!-- Holiday Modal -->
+    <div class="modal fade" id="holidayModal" tabindex="-1" aria-labelledby="holidayModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="holidayModalLabel">Confirm Holiday</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Please enter your password to confirm:</p>
+                    <input type="password" id="teacherPassword" class="form-control" placeholder="Enter password">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="confirmHoliday()">Confirm</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div class="modal fade" id="submitConfirmModal" tabindex="-1" aria-labelledby="submitConfirmLabel"
+        aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="submitConfirmLabel">Confirm Attendance Submission</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    Are you sure you want to submit the attendance?
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-success" id="confirmSubmitBtn">Yes, Submit</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="text-center mt-5 py-2" style="background-color: #023246; color: #f6f6f6;">
+        &copy; 2025 Smart Attendance System. All rights reserved.
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.6/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    // === IndexedDB Setup ===
+    let db;
+    const DB_NAME = 'attendanceDB',
+        DB_VERSION = 6;
+
+    function openDB() {
+        return new Promise((resolve, reject) => {
+            if (db) return resolve(db);
+            const req = indexedDB.open(DB_NAME, DB_VERSION);
+            req.onupgradeneeded = evt => {
+                db = evt.target.result;
+                ["classes", "students", "teachers", "holidays", "attendance", "logs"].forEach(store => {
+                    if (!db.objectStoreNames.contains(store)) {
+                        db.createObjectStore(store, {
+                            keyPath: store === 'holidays' ? 'date' : 'id',
+                            autoIncrement: store === 'attendance' || store === 'logs'
+                        });
+                    }
+                });
+            };
+            req.onsuccess = evt => {
+                db = evt.target.result;
+                resolve(db);
+            };
+            req.onerror = evt => reject(evt.target.error);
+        });
+    }
+
+    function getAll(store) {
+        return openDB().then(() =>
+            new Promise((res, rej) => {
+                const tx = db.transaction([store], "readonly"),
+                    s = tx.objectStore(store),
+                    r = s.getAll();
+                r.onsuccess = () => res(r.result);
+                r.onerror = () => rej(r.error);
+            })
+        );
+    }
+
+    function save(store, value) {
+        return openDB().then(() =>
+            new Promise((res, rej) => {
+                const tx = db.transaction([store], "readwrite"),
+                    s = tx.objectStore(store),
+                    r = s.put(value);
+                r.onsuccess = () => res(true);
+                r.onerror = () => rej(r.error);
+            })
+        );
+    }
+
+    function add(store, value) {
+        return openDB().then(() =>
+            new Promise((res, rej) => {
+                const tx = db.transaction([store], "readwrite"),
+                    s = tx.objectStore(store),
+                    r = s.add(value);
+                r.onsuccess = () => res(true);
+                r.onerror = () => rej(r.error);
+            })
+        );
+    }
+
+    function getQueryParam(param) {
+        const urlParams = new URLSearchParams(window.location.search);
+        return urlParams.get(param);
+    }
+
+    // --- Utility Functions ---
+    function updateDateTime() {
+        const now = new Date();
+        document.getElementById("date-time").textContent =
+            `${now.toLocaleDateString()} | ${now.toLocaleTimeString()}`;
+    }
+    updateDateTime();
+    setInterval(updateDateTime, 1000);
+
+    // Modified: Get teacherId and classId from URL or localStorage, else redirect
+    function getTeacherId() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const tid = urlParams.get("teacherid");
+        if (tid) {
+            localStorage.setItem('teacherid', tid);
+            return tid;
+        }
+        const storedTid = localStorage.getItem('teacherid');
+        if (storedTid) return storedTid;
+        return null;
+    }
+
+    function getClassId() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const cid = urlParams.get("classid");
+        if (cid) {
+            localStorage.setItem('classid', cid);
+            return cid;
+        }
+        const storedCid = localStorage.getItem('classid');
+        if (storedCid) return storedCid;
+        return null;
+    }
+
+    // --- Set teacher and class info from DB ---
+    async function setTeacherAndClassInfo() {
+        await openDB();
+
+        const teacherId = getTeacherId();
+        const classId = getClassId();
+
+        if (!teacherId || !classId) {
+            alert("Missing teacher ID or class ID. Please login again.");
+            window.location.href = "index.html";
+            return;
+        }
+
+        // Get teacher name from DB
+        let teacherName = teacherId;
+        const teachers = await getAll('teachers');
+        const teacher = teachers.find(t => t.teacherid === teacherId || t.id === teacherId);
+        if (teacher && teacher.name) teacherName = `${teacher.name} (${teacherId})`;
+
+        // Get class name from DB
+        let className = classId;
+        const classes = await getAll('classes');
+        const cls = classes.find(c => c.classid === classId || c.id === classId);
+        if (cls && cls.name) className = `${cls.name} (${classId})`;
+
+        document.getElementById('username').textContent = teacherName || "";
+        document.getElementById('class-id').textContent = className || "";
+    }
+
+    // Call this on page load
+    document.addEventListener("DOMContentLoaded", async () => {
+        await setTeacherAndClassInfo();
+        await loadHolidays();
+        await fetchAndRenderStudents();
+    });
+
+    // ========== Attendance Logic ==========
+    let holidays = [];
+
+    async function loadHolidays() {
+        holidays = await getAll('holidays');
+    }
+
+    let studentList = [];
+    let attendanceDate = new Date().toISOString().slice(0, 10);
+    let teacherName = null;
+
+    async function fetchAndRenderStudents() {
+        try {
+            await openDB();
+
+            const classId = getQueryParam("classid");
+            const teacherId = getQueryParam("teacherid");
+
+            if (!classId || !teacherId) {
+                console.error("Class ID or Teacher ID missing from URL parameters.");
+                return;
+            }
+
+            const teachers = await getAll('teachers');
+            const teacher = teachers.find(t => t.teacherid === teacherId || t.id === teacherId);
+
+            if (!teacher) {
+                console.error(`Teacher with ID ${teacherId} not found.`);
+                return;
+            }
+
+            teacherName = teacher.name;
+
+            const allStudents = await getAll('students');
+            studentList = allStudents.filter(s => s.classid === classId || s.classId === classId);
+
+            const attendanceAll = await getAll('attendance');
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            const yDate = yesterday.toISOString().slice(0, 10);
+
+            const tbody = document.getElementById("studentTable");
+            if (!studentList.length) {
+                tbody.innerHTML =
+                    `<tr><td colspan="3" class="text-center text-muted">No students found for this class.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = "";
+            for (let s of studentList) {
+                const att = attendanceAll.slice().reverse().find(a =>
+                    a.studentid === (s.id || s.studentid) && a.date === yDate
+                );
+                tbody.innerHTML += `<tr class="text-center">
+          <td>${s.name}</td>
+          <td>${att ? att.status : '<span class="text-muted">-</span>'}</td>
+          <td>
+            <input type="checkbox" class="form-check-input student-checkbox"
+              data-studentid="${s.id || s.studentid}"
+              data-classid="${classId}"
+              data-name="${s.name}">
+          </td>
+        </tr>`;
+            }
+
+        } catch (error) {
+            console.error('Error fetching and rendering students:', error);
+        }
+    }
+
+    // Select all toggle
+    document.getElementById("selectAllCheckbox").addEventListener("change", function () {
+        const allCheckboxes = document.querySelectorAll(".student-checkbox");
+        allCheckboxes.forEach(cb => cb.checked = this.checked);
+    });
+
+    document.addEventListener("change", function (e) {
+        if (e.target.classList.contains('student-checkbox')) {
+            const all = document.querySelectorAll(".student-checkbox");
+            const selected = [...all].every(cb => cb.checked);
+            document.getElementById("selectAllCheckbox").checked = !!all.length && selected;
+        }
+    });
+
+    let onConfirmSubmit = null;
+
+    document.getElementById("attendanceForm").addEventListener("submit", function (e) {
+        e.preventDefault();
+        const modal = new bootstrap.Modal(document.getElementById("submitConfirmModal"));
+        onConfirmSubmit = submitAttendance;
+        modal.show();
+    });
+
+    document.getElementById("confirmSubmitBtn").addEventListener("click", async function () {
+        if (onConfirmSubmit) await onConfirmSubmit();
+        const modal = bootstrap.Modal.getInstance(document.getElementById("submitConfirmModal"));
+        modal.hide();
+        setTimeout(() => document.body.focus(), 0);
+    });
+
+    async function submitAttendance() {
+        await openDB();
+        const teacherId = getQueryParam("teacherid");
+        const classId = getQueryParam("classid");
+        const today = new Date().toISOString().slice(0, 10);
+
+        // --- Block attendance if today is a holiday ---
+        const allHolidays = await getAll('holidays');
+        const isTodayHoliday = allHolidays.some(h => h.date === today);
+        if (isTodayHoliday) {
+            alert("Attendance cannot be marked on a holiday.");
+            return;
+        }
+        // --- End block ---
+
+        // Check if attendance already exists for this class and date
+        const allAttendance = await getAll('attendance');
+        const alreadyMarked = allAttendance.some(
+            a => (a.classid === classId || a.classId === classId) && a.date === today
+        );
+
+        if (alreadyMarked) {
+            alert("Attendance for this class has already been marked today. You cannot submit again.");
+            return;
+        }
+
+        const attendanceData = [...document.querySelectorAll(".student-checkbox")].map(cb => ({
+        studentId: cb.dataset.studentid,
+        classId: classId,
+        status: cb.checked ? "Present" : "Absent",
+        markedByAdmin: false,
+        markedBy: teacherId,
+        markedBy_name: teacherName,
+        date: today
+    }));
+
+
+
+        try {
+            // Remove existing attendance for today (if any)
+            const attAll = await getAll('attendance');
+            const tx = db.transaction(['attendance'], "readwrite");
+            const store = tx.objectStore('attendance');
+
+            // Delete existing records for today and this class
+            const deletePromises = [];
+            attAll.forEach((a, index) => {
+                if (a.classid === classId && a.date === today) {
+                    deletePromises.push(new Promise((resolve, reject) => {
+                        const deleteReq = store.delete(index + 1); // IndexedDB uses 1-based auto-increment
+                        deleteReq.onsuccess = () => resolve();
+                        deleteReq.onerror = () => reject(deleteReq.error);
+                    }));
+                }
+            });
+
+            await Promise.all(deletePromises);
+
+            // Add new attendance records
+            for (const record of attendanceData) {
+                await add('attendance', record);
+            }
+
+            // Add log for admin review
+            await add('logs', {
+                type: 'Attendance',
+                message: `Teacher ${teacherName} (${teacherId}) marked attendance for class ${classId} on ${today}`,
+                date: today,
+                classId: classId,
+                markedBy: teacherId
+            });
+
+            alert("✅ Attendance submitted successfully!");
+        } catch (error) {
+            console.error('Error submitting attendance:', error);
+            alert("❌ Failed to submit attendance.");
+        }
+    }
+
+    async function confirmHoliday() {
+        const password = document.getElementById("teacherPassword").value;
+        const teacherId = getQueryParam('teacherid') || 'teacher1';
+        await openDB();
+        const teachers = await getAll('teachers');
+        const teacher = teachers.find(t => (t.id || t.teacherid) === teacherId && t.password === password);
+        if (!teacher) {
+            alert("Incorrect password. Try again.");
+            return;
+        }
+
+        const today = new Date().toISOString().slice(0, 10);
+        await save('holidays', {
+            date: today,
+            reason: `Marked as holiday by ${teacher.name || teacherId}`
+        });
+        alert("Holiday set successfully.");
+        const modal = bootstrap.Modal.getInstance(document.getElementById("holidayModal"));
+        modal.hide();
+        document.getElementById("teacherPassword").value = "";
+    }
+
+    // Initialize sample data
+    openDB().then(() => {
+        add('teachers', { teacherid: 'T2', name: 'Mohan' }).catch(() => {});
+        add('classes', { classid: 'C2', name: 'CSE' }).catch(() => {});
+    });
+</script>
+
+</body>
+
+</html>

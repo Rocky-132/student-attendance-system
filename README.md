@@ -1,174 +1,140 @@
-# student-attendance-system
- Smart Attendance System is a web-based attendance management platform for schools and colleges. Features include teacher &amp; student login, attendance marking, admin dashboard, attendance analytics, holiday management, reports, and calendar tracking using HTML, JavaScript, Bootstrap, IndexedDB, and Express.js.
+# accepts
 
- Smart Attendance System
+[![NPM Version][npm-version-image]][npm-url]
+[![NPM Downloads][npm-downloads-image]][npm-url]
+[![Node.js Version][node-version-image]][node-version-url]
+[![Build Status][github-actions-ci-image]][github-actions-ci-url]
+[![Test Coverage][coveralls-image]][coveralls-url]
 
- Overview
+Higher level content negotiation based on [negotiator](https://www.npmjs.com/package/negotiator).
+Extracted from [koa](https://www.npmjs.com/package/koa) for general use.
 
-Smart Attendance System is a web-based attendance management application developed for educational institutions. It allows teachers to efficiently mark attendance, students to track their attendance records, and administrators to manage classes, students, teachers, holidays, and reports.
+In addition to negotiator, it allows:
 
-The system provides role-based access, attendance analytics, holiday management, and interactive dashboards using modern web technologies.
+- Allows types as an array or arguments list, ie `(['text/html', 'application/json'])`
+  as well as `('text/html', 'application/json')`.
+- Allows type shorthands such as `json`.
+- Returns `false` when no types match
+- Treats non-existent headers as `*`
 
----
+## Installation
 
- Features
+This is a [Node.js](https://nodejs.org/en/) module available through the
+[npm registry](https://www.npmjs.com/). Installation is done using the
+[`npm install` command](https://docs.npmjs.com/getting-started/installing-npm-packages-locally):
 
- Teacher Module
-
-* Secure teacher login
-* Mark daily attendance
-* Mark all students present option
-* Set holidays with password verification
-* View attendance reports and analytics
-
- Student Module
-
-* Student login system
-* Search attendance using Student ID
-* Interactive attendance calendar
-* Attendance history and status tracking
-
- Admin Module
-
-* Manage classes
-* Manage students
-* Manage teachers
-* Manage attendance
-* Manage holidays
-* View write logs
-* Class-wise attendance analytics
-
- Analytics & Reports
-
-* Daily attendance trend charts
-* Overall attendance analytics
-* Attendance reports by date
-* Student-wise attendance tracking
-
----
-
- Technologies Used
-
-### Frontend
-
-* HTML5
-* CSS3
-* JavaScript
-* Bootstrap 5
-* Bootstrap Icons
-* Chart.js
-* FullCalendar
-
-### Backend / Storage
-
-* IndexedDB (Browser Database)
-* Express.js
-
----
-
- Project Structure
-
-```bash id="ps1"
-├── index.html              # Main Login Page
-├── teacherlogin.html       # Teacher Dashboard
-├── studentlogin.html       # Student Attendance Portal
-├── attendance.html         # Attendance Marking Page
-├── report.html             # Attendance Reports & Analytics
-├── Admin.html              # Admin Dashboard
-├── package.json            # Project Dependencies
-├── README.md               # Project Documentation
+```sh
+$ npm install accepts
 ```
 
----
+## API
 
- User Roles
-
-### Admin
-
-* Full system control
-* Manage all records
-* Access logs and reports
-
-### Teacher
-
-* Mark attendance
-* Declare holidays
-* View reports
-
-### Student
-
-* View attendance records
-* Track attendance calendar
-
----
-
- Installation & Setup
-
- Clone Repository
-
-```bash id="ps2"
-git clone https://github.com/your-username/smart-attendance-system.git
-cd smart-attendance-system
+```js
+var accepts = require('accepts')
 ```
 
- Install Dependencies
+### accepts(req)
 
-```bash id="ps3"
-npm install
+Create a new `Accepts` object for the given `req`.
+
+#### .charset(charsets)
+
+Return the first accepted charset. If nothing in `charsets` is accepted,
+then `false` is returned.
+
+#### .charsets()
+
+Return the charsets that the request accepts, in the order of the client's
+preference (most preferred first).
+
+#### .encoding(encodings)
+
+Return the first accepted encoding. If nothing in `encodings` is accepted,
+then `false` is returned.
+
+#### .encodings()
+
+Return the encodings that the request accepts, in the order of the client's
+preference (most preferred first).
+
+#### .language(languages)
+
+Return the first accepted language. If nothing in `languages` is accepted,
+then `false` is returned.
+
+#### .languages()
+
+Return the languages that the request accepts, in the order of the client's
+preference (most preferred first).
+
+#### .type(types)
+
+Return the first accepted type (and it is returned as the same text as what
+appears in the `types` array). If nothing in `types` is accepted, then `false`
+is returned.
+
+The `types` array can contain full MIME types or file extensions. Any value
+that is not a full MIME type is passed to `require('mime-types').lookup`.
+
+#### .types()
+
+Return the types that the request accepts, in the order of the client's
+preference (most preferred first).
+
+## Examples
+
+### Simple type negotiation
+
+This simple example shows how to use `accepts` to return a different typed
+respond body based on what the client wants to accept. The server lists it's
+preferences in order and will get back the best match between the client and
+server.
+
+```js
+var accepts = require('accepts')
+var http = require('http')
+
+function app (req, res) {
+  var accept = accepts(req)
+
+  // the order of this list is significant; should be server preferred order
+  switch (accept.type(['json', 'html'])) {
+    case 'json':
+      res.setHeader('Content-Type', 'application/json')
+      res.write('{"hello":"world!"}')
+      break
+    case 'html':
+      res.setHeader('Content-Type', 'text/html')
+      res.write('<b>hello, world!</b>')
+      break
+    default:
+      // the fallback is text/plain, so no need to specify it above
+      res.setHeader('Content-Type', 'text/plain')
+      res.write('hello, world!')
+      break
+  }
+
+  res.end()
+}
+
+http.createServer(app).listen(3000)
 ```
 
- Run Project
-
-```bash id="ps4"
-npm start
+You can test this out with the cURL program:
+```sh
+curl -I -H'Accept: text/html' http://localhost:3000/
 ```
 
----
+## License
 
- Key Functionalities
+[MIT](LICENSE)
 
-* Real-time attendance management
-* Browser-based database using IndexedDB
-* Interactive UI with Bootstrap
-* Responsive design for desktop and mobile
-* Attendance analytics with charts
-* Holiday and log management
-
----
-
- Screenshots
-
-* Login Page
-* Teacher Dashboard
-* Student Attendance Calendar
-* Attendance Reports
-* Admin Dashboard
-
-(Add screenshots here)
-
----
-
- Future Enhancements
-
-* Cloud database integration
-* QR code attendance system
-* Face recognition attendance
-* Email/SMS notifications
-* Export reports to PDF/Excel
-* Multi-school support
-
----
-
-##  Team Members
-
-* Devendra Rakesh Vajrapu
-* Naravula Prudhvi Sri Bhanu Vivek
-* Padamata Narendra Kumar
-* Naidu Jaswanth
-* Shaik Adhik
-
----
-
-## 📜 License
-
-This project is developed for educational and academic purposes.
+[coveralls-image]: https://badgen.net/coveralls/c/github/jshttp/accepts/master
+[coveralls-url]: https://coveralls.io/r/jshttp/accepts?branch=master
+[github-actions-ci-image]: https://badgen.net/github/checks/jshttp/accepts/master?label=ci
+[github-actions-ci-url]: https://github.com/jshttp/accepts/actions/workflows/ci.yml
+[node-version-image]: https://badgen.net/npm/node/accepts
+[node-version-url]: https://nodejs.org/en/download
+[npm-downloads-image]: https://badgen.net/npm/dm/accepts
+[npm-url]: https://npmjs.org/package/accepts
+[npm-version-image]: https://badgen.net/npm/v/accepts
